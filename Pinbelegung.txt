@@ -1,0 +1,29 @@
+Pinbelegung: ESP32-S3-DevKitC-1 <-> TFT Display HSD-9190J-C7 (SPI)
+=====================================================================
+
+Display und Touch teilen sich den SPI-Bus (SCK, MOSI, MISO).
+Sie werden ueber separate Chip-Select-Pins (CS) angesprochen.
+
+Display-Pin   Funktion                  ESP32-S3 GPIO
+-----------   ------------------------  -------------
+VCC           Stromversorgung           3V3
+GND           Masse                     GND
+CS            LCD Chip Select           GPIO 10
+RESET         LCD Reset (active low)    GPIO 8
+DC/RS         Data/Command Select       GPIO 9
+SDI (MOSI)    SPI Daten zum Display     GPIO 11
+SCK           SPI Takt                  GPIO 12
+LED           Hintergrundbeleuchtung    GPIO 14
+SDO (MISO)    SPI Daten vom Display     GPIO 13
+
+T_CLK         Touch SPI Takt            GPIO 12  (= SCK)
+T_CS          Touch Chip Select         GPIO 15
+T_DIN         Touch Daten rein          GPIO 11  (= MOSI)
+T_DO          Touch Daten raus          GPIO 13  (= MISO)
+T_IRQ         Touch Interrupt           GPIO 16
+
+Hinweise:
+- Versorgung ueber 3V3-Pin des ESP32-S3 (nicht 5V)
+- T_CLK, T_DIN, T_DO sind mit SCK, MOSI, MISO verbunden (gemeinsamer SPI-Bus)
+- Display-Controller: ST7796S
+- Touch-Controller:   XPT2046
