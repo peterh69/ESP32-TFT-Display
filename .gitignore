@@ -1,0 +1,13 @@
+# PlatformIO Build-Artefakte
+.pio/
+
+# IDE-Dateien
+.vscode/
+.idea/
+
+# OS-spezifisch
+.DS_Store
+Thumbs.db
+
+# Sensible Dateien
+Github_Token.txt
