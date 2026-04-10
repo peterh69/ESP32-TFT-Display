@@ -1,6 +1,8 @@
-Pinbelegung: ESP32-S3-DevKitC-1 <-> TFT Display HSD-9190J-C7 (SPI)
+Pinbelegung: ESP32-S3-DevKitC-1 - Gesamtuebersicht
 =====================================================================
 
+1) TFT Display HSD-9190J-C7 (SPI)
+-----------------------------------
 Display und Touch teilen sich den SPI-Bus (SCK, MOSI, MISO).
 Sie werden ueber separate Chip-Select-Pins (CS) angesprochen.
 
@@ -22,8 +24,42 @@ T_DIN         Touch Daten rein          GPIO 11  (= MOSI)
 T_DO          Touch Daten raus          GPIO 13  (= MISO)
 T_IRQ         Touch Interrupt           GPIO 16
 
-Hinweise:
-- Versorgung ueber 3V3-Pin des ESP32-S3 (nicht 5V)
-- T_CLK, T_DIN, T_DO sind mit SCK, MOSI, MISO verbunden (gemeinsamer SPI-Bus)
-- Display-Controller: ST7796S
-- Touch-Controller:   XPT2046
+Display-Controller: ST7796S
+Touch-Controller:   XPT2046
+
+
+2) Audio-Verstaerker MAX98357A (I2S)
+--------------------------------------
+MAX98357A-Pin Funktion                  ESP32-S3 GPIO
+------------- ------------------------  -------------
+VIN           Stromversorgung           5V
+GND           Masse                     GND
+DIN           I2S Daten                 GPIO 6
+BCLK          I2S Bit-Takt              GPIO 4
+LRC           I2S Links/Rechts-Takt     GPIO 5
+SD            Shutdown (offen = an)     (nicht verbunden)
+GAIN          Verstaerkung (offen=9dB)  (nicht verbunden)
+
+Lautsprecher (4 oder 8 Ohm) an +/- Schraubklemme.
+
+
+3) Onboard NeoPixel LED
+-------------------------
+NeoPixel (WS2812B)                      GPIO 48
+
+
+GPIO-Belegung Uebersicht
+==========================
+GPIO 4  - I2S BCLK  (Audio)
+GPIO 5  - I2S LRC   (Audio)
+GPIO 6  - I2S DIN   (Audio)
+GPIO 8  - TFT RST
+GPIO 9  - TFT DC
+GPIO 10 - TFT CS
+GPIO 11 - SPI MOSI  (Display + Touch)
+GPIO 12 - SPI SCK   (Display + Touch)
+GPIO 13 - SPI MISO  (Display + Touch)
+GPIO 14 - TFT Backlight
+GPIO 15 - Touch CS
+GPIO 16 - Touch IRQ
+GPIO 48 - NeoPixel LED
