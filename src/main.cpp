@@ -20,6 +20,8 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ArduinoOTA.h>
+#include <Preferences.h>
 #include <TFT_eSPI.h>
 #include <SPI.h>
 #include <AudioFileSourceICYStream.h>
@@ -29,6 +31,8 @@
 
 #define WIFI_SSID     "REDACTED_SSID"
 #define WIFI_PASSWORD "REDACTED_PASSWORD"
+#define OTA_HOSTNAME  "radio10"
+#define OTA_PASSWORD  "radio10"
 
 TFT_eSPI tft = TFT_eSPI();
 #define TFT_BL_PIN 14
@@ -40,6 +44,11 @@ AudioOutputI2S           *ausgang = nullptr;
 #define AUDIO_PUFFER_GROESSE 8192
 
 uint16_t calData[5];
+Preferences prefs;
+static const char *CAL_NS     = "touch";
+static const char *CAL_KEY    = "caldata";
+static const char *RADIO_NS   = "radio";
+static const char *SENDER_KEY = "sender";
 
 struct Sender {
     const char *name;
@@ -73,6 +82,126 @@ float lautstaerke = 0.5f;
 #define VOL_BREITE      50
 #define VOL_HOEHE       200
 #define STATUS_Y        250
+
+void stoppeStream();
+
+void initOTA() {
+    ArduinoOTA.setHostname(OTA_HOSTNAME);
+    ArduinoOTA.setPassword(OTA_PASSWORD);
+    ArduinoOTA.onStart([]() {
+        stoppeStream();
+        tft.fillScreen(TFT_BLACK);
+        tft.setTextColor(TFT_CYAN, TFT_BLACK);
+        tft.setTextSize(3);
+        tft.setCursor(60, 100);
+        tft.println("OTA Update");
+        tft.setTextSize(2);
+        tft.setCursor(60, 150);
+        tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        tft.print("Starte...");
+        Serial.println("[OTA] Start");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        int prozent = (progress * 100) / total;
+        int balkenX = 60, balkenY = 200, balkenB = 360, balkenH = 30;
+        tft.drawRect(balkenX, balkenY, balkenB, balkenH, TFT_WHITE);
+        int fuell = ((balkenB - 4) * prozent) / 100;
+        tft.fillRect(balkenX + 2, balkenY + 2, fuell, balkenH - 4, TFT_GREEN);
+        tft.fillRect(60, 150, 360, 20, TFT_BLACK);
+        tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+        tft.setTextSize(2);
+        tft.setCursor(60, 150);
+        tft.printf("%d%%", prozent);
+    });
+    ArduinoOTA.onEnd([]() {
+        tft.fillRect(60, 150, 360, 20, TFT_BLACK);
+        tft.setTextColor(TFT_GREEN, TFT_BLACK);
+        tft.setTextSize(2);
+        tft.setCursor(60, 150);
+        tft.print("Fertig - Neustart");
+        Serial.println("[OTA] Ende");
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+        tft.fillRect(60, 150, 360, 20, TFT_BLACK);
+        tft.setTextColor(TFT_RED, TFT_BLACK);
+        tft.setTextSize(2);
+        tft.setCursor(60, 150);
+        tft.printf("Fehler %u", error);
+        Serial.printf("[OTA] Fehler %u\n", error);
+    });
+    ArduinoOTA.begin();
+    Serial.printf("[OTA] bereit: %s.local (%s)\n",
+                  OTA_HOSTNAME, WiFi.localIP().toString().c_str());
+}
+
+void ladeLetztenSender() {
+    prefs.begin(RADIO_NS, true);
+    int idx = prefs.getInt(SENDER_KEY, 0);
+    prefs.end();
+    if (idx < 0 || idx >= SENDER_ANZAHL) idx = 0;
+    aktuellerSender = idx;
+    Serial.printf("[Radio] Letzter Sender aus NVS: %d (%s)\n",
+                  idx, sender[idx].name);
+}
+
+void speichereSender() {
+    prefs.begin(RADIO_NS, false);
+    prefs.putInt(SENDER_KEY, aktuellerSender);
+    prefs.end();
+}
+
+bool ladeKalibrierung() {
+    prefs.begin(CAL_NS, true);
+    size_t len = prefs.getBytesLength(CAL_KEY);
+    if (len != sizeof(calData)) { prefs.end(); return false; }
+    prefs.getBytes(CAL_KEY, calData, sizeof(calData));
+    prefs.end();
+    return true;
+}
+
+void speichereKalibrierung() {
+    prefs.begin(CAL_NS, false);
+    prefs.putBytes(CAL_KEY, calData, sizeof(calData));
+    prefs.end();
+}
+
+void kalibriereUndSpeichere() {
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.setTextSize(2);
+    tft.setCursor(60, 130);
+    tft.println("Touch-Kalibrierung");
+    tft.setTextSize(1);
+    tft.setCursor(60, 160);
+    tft.println("Beruehre die 4 Pfeilspitzen");
+    delay(2500);
+    tft.calibrateTouch(calData, TFT_YELLOW, TFT_BLACK, 15);
+    tft.setTouch(calData);
+    speichereKalibrierung();
+    Serial.printf("[Touch] Neue Kalibrierung: %u,%u,%u,%u,%u\n",
+                  calData[0], calData[1], calData[2], calData[3], calData[4]);
+}
+
+/* Waehrend Splash: Bildschirm beruehren erzwingt Neukalibrierung.
+ * Nutzt getTouchRaw(), da calData evtl. noch nicht gesetzt ist. */
+bool neukalibrierungAngefordert() {
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setTextSize(2);
+    tft.setCursor(40, 100);
+    tft.println("Radio 10 Player");
+    tft.setTextSize(1);
+    tft.setCursor(40, 140);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.println("Bildschirm beruehren fuer Neukalibrierung...");
+    unsigned long start = millis();
+    uint16_t rx, ry;
+    while (millis() - start < 2500) {
+        if (tft.getTouchRaw(&rx, &ry) && rx > 100 && ry > 100) return true;
+        delay(10);
+    }
+    return false;
+}
 
 void zeichneHeader() {
     tft.fillRect(0, 0, 480, HEADER_HOEHE, TFT_BLACK);
@@ -212,6 +341,7 @@ void verarbeiteTouch() {
         if (tx >= bx && tx <= bx + BTN_BREITE && ty >= by && ty <= by + BTN_HOEHE) {
             if (i != aktuellerSender) {
                 aktuellerSender = i;
+                speichereSender();
                 zeichneHeader();
                 zeichneSenderButtons();
                 starteSender();
@@ -232,17 +362,19 @@ void setup() {
     tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
 
-    /* Touch kalibrieren (Pfeile 30px vom Rand) */
-    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-    tft.setTextSize(2);
-    tft.setCursor(60, 130);
-    tft.println("Touch-Kalibrierung");
-    tft.setTextSize(1);
-    tft.setCursor(60, 160);
-    tft.println("Beruehre die 4 Pfeilspitzen");
-    delay(2500);
-    tft.calibrateTouch(calData, TFT_YELLOW, TFT_BLACK, 15);
-    tft.setTouch(calData);
+    /* Touch-Kalibrierung:
+     *   - gespeicherte Werte aus NVS laden, falls vorhanden
+     *   - waehrend 2.5s Splash Bildschirm beruehren -> Neukalibrierung
+     *   - keine Daten in NVS -> Erst-Kalibrierung */
+    bool forceCal = neukalibrierungAngefordert();
+    bool haveCal  = !forceCal && ladeKalibrierung();
+    if (haveCal) {
+        tft.setTouch(calData);
+        Serial.printf("[Touch] Kalibrierung aus NVS: %u,%u,%u,%u,%u\n",
+                      calData[0], calData[1], calData[2], calData[3], calData[4]);
+    } else {
+        kalibriereUndSpeichere();
+    }
 
     /* WLAN */
     tft.fillScreen(TFT_BLACK);
@@ -260,10 +392,13 @@ void setup() {
     }
     Serial.printf("[WLAN] IP: %s\n", WiFi.localIP().toString().c_str());
 
+    initOTA();
+
     ausgang = new AudioOutputI2S();
     ausgang->SetPinout(4, 5, 6);
     ausgang->SetGain(lautstaerke);
 
+    ladeLetztenSender();
     zeichneUI();
     starteSender();
 }
@@ -271,6 +406,7 @@ void setup() {
 unsigned long letzterUIUpdate = 0;
 
 void loop() {
+    ArduinoOTA.handle();
     if (mp3 && mp3->isRunning()) {
         if (!mp3->loop()) { delay(1000); starteSender(); }
     }
