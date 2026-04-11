@@ -20,6 +20,8 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WebServer.h>
+#include <Update.h>
 #include <ArduinoOTA.h>
 #include <Preferences.h>
 #include <TFT_eSPI.h>
@@ -36,6 +38,8 @@
 
 TFT_eSPI tft = TFT_eSPI();
 #define TFT_BL_PIN 14
+
+WebServer webOtaServer(80);
 
 AudioFileSourceICYStream *stream = nullptr;
 AudioFileSourceBuffer    *puffer = nullptr;
@@ -84,6 +88,90 @@ float lautstaerke = 0.5f;
 #define STATUS_Y        250
 
 void stoppeStream();
+
+/* ----------------- Web-OTA ----------------- *
+ * Upload: curl -F "update=@firmware.bin" http://radio10.local/update
+ * Browser: http://radio10.local/ (einfaches Upload-Formular)        */
+
+void zeigeWebOtaFortschritt(int prozent) {
+    int balkenX = 60, balkenY = 200, balkenB = 360, balkenH = 30;
+    tft.drawRect(balkenX, balkenY, balkenB, balkenH, TFT_WHITE);
+    int fuell = ((balkenB - 4) * prozent) / 100;
+    tft.fillRect(balkenX + 2, balkenY + 2, fuell, balkenH - 4, TFT_GREEN);
+    tft.fillRect(60, 150, 360, 20, TFT_BLACK);
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.setTextSize(2);
+    tft.setCursor(60, 150);
+    tft.printf("%d%%", prozent);
+}
+
+void initWebOTA() {
+    webOtaServer.on("/", HTTP_GET, []() {
+        webOtaServer.send(200, "text/html",
+            "<!DOCTYPE html><html><body style='font-family:sans-serif'>"
+            "<h2>Radio 10 Firmware Update</h2>"
+            "<form method='POST' action='/update' enctype='multipart/form-data'>"
+            "<input type='file' name='update' accept='.bin'><br><br>"
+            "<input type='submit' value='Upload'></form></body></html>");
+    });
+    webOtaServer.on("/update", HTTP_POST,
+        []() {
+            webOtaServer.sendHeader("Connection", "close");
+            webOtaServer.send(200, "text/plain",
+                Update.hasError() ? "FAIL" : "OK - rebooting");
+            delay(200);
+            ESP.restart();
+        },
+        []() {
+            HTTPUpload &u = webOtaServer.upload();
+            static size_t erwartet = 0;
+            if (u.status == UPLOAD_FILE_START) {
+                stoppeStream();
+                tft.fillScreen(TFT_BLACK);
+                tft.setTextColor(TFT_CYAN, TFT_BLACK);
+                tft.setTextSize(3);
+                tft.setCursor(60, 100);
+                tft.println("Web-OTA");
+                tft.setTextSize(2);
+                tft.setCursor(60, 150);
+                tft.setTextColor(TFT_WHITE, TFT_BLACK);
+                tft.print("Empfange...");
+                Serial.printf("[WebOTA] Start: %s\n", u.filename.c_str());
+                erwartet = UPDATE_SIZE_UNKNOWN;
+                if (!Update.begin(erwartet)) {
+                    Update.printError(Serial);
+                }
+            } else if (u.status == UPLOAD_FILE_WRITE) {
+                if (Update.write(u.buf, u.currentSize) != u.currentSize) {
+                    Update.printError(Serial);
+                }
+                static unsigned long letzteAnzeige = 0;
+                if (millis() - letzteAnzeige > 250) {
+                    letzteAnzeige = millis();
+                    int p = (int)((Update.progress() * 100) / Update.size());
+                    if (p < 0) p = 0; if (p > 100) p = 100;
+                    zeigeWebOtaFortschritt(p);
+                }
+            } else if (u.status == UPLOAD_FILE_END) {
+                if (Update.end(true)) {
+                    Serial.printf("[WebOTA] OK: %u bytes\n", u.totalSize);
+                    zeigeWebOtaFortschritt(100);
+                    tft.fillRect(60, 150, 360, 20, TFT_BLACK);
+                    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+                    tft.setTextSize(2);
+                    tft.setCursor(60, 150);
+                    tft.print("Fertig - Neustart");
+                } else {
+                    Update.printError(Serial);
+                    tft.setTextColor(TFT_RED, TFT_BLACK);
+                    tft.setCursor(60, 150);
+                    tft.print("FEHLER");
+                }
+            }
+        });
+    webOtaServer.begin();
+    Serial.println("[WebOTA] bereit auf http://radio10.local/");
+}
 
 void initOTA() {
     ArduinoOTA.setHostname(OTA_HOSTNAME);
@@ -393,6 +481,7 @@ void setup() {
     Serial.printf("[WLAN] IP: %s\n", WiFi.localIP().toString().c_str());
 
     initOTA();
+    initWebOTA();
 
     ausgang = new AudioOutputI2S();
     ausgang->SetPinout(4, 5, 6);
@@ -407,6 +496,7 @@ unsigned long letzterUIUpdate = 0;
 
 void loop() {
     ArduinoOTA.handle();
+    webOtaServer.handleClient();
     if (mp3 && mp3->isRunning()) {
         if (!mp3->loop()) { delay(1000); starteSender(); }
     }
