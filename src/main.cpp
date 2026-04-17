@@ -31,10 +31,9 @@
 #include <AudioGeneratorMP3.h>
 #include <AudioOutputI2S.h>
 
-#define WIFI_SSID     "REDACTED_SSID"
-#define WIFI_PASSWORD "REDACTED_PASSWORD"
-#define OTA_HOSTNAME  "radio10"
-#define OTA_PASSWORD  "radio10"
+// WLAN- und OTA-Zugangsdaten ausgelagert nach include/secrets.h
+// (steht in .gitignore - Vorlage: include/secrets.example.h)
+#include "secrets.h"
 
 TFT_eSPI tft = TFT_eSPI();
 #define TFT_BL_PIN 14
